@@ -1,6 +1,8 @@
 from fastapi import FastAPI
-from backend.database import engine, Base
 from sqlalchemy import text
+
+from backend.database import engine, Base
+from backend.models.user import User
 
 app = FastAPI()
 
