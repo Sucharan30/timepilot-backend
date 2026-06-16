@@ -1,12 +1,14 @@
 from fastapi import FastAPI
+from database import engine, Base
 from sqlalchemy import text
-from database import engine
 
 app = FastAPI()
 
+Base.metadata.create_all(bind=engine)
+
 @app.get("/")
 def root():
-    return {"status": "running"}
+    return {"status":"running"}
 
 @app.get("/db-test")
 def db_test():
