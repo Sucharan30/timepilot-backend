@@ -26,11 +26,12 @@ def db_test():
         }
     
 @app.get("/tables")
-def get_tables():
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text("SHOW TABLES"))
-            tables = [row[0] for row in result.fetchall()]
-            return {"tables": tables}
-    except Exception as e:
-        return {"error": str(e)}
+def tables():
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SHOW TABLES")
+        )
+
+        return {
+            "tables": [row[0] for row in result]
+        }
