@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import os
 from sqlalchemy.orm import declarative_base
+from backend.models.user import User
 
 Base = declarative_base()
 
