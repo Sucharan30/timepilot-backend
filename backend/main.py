@@ -6,11 +6,12 @@ Railway Procfile: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 
 Startup:
   - Reads settings from environment variables (Railway Variables / .env)
-  - Creates all DB tables via SQLAlchemy (migration-ready; Alembic can take over later)
+  - Creates all DB tables via SQLAlchemy
+  - Starts APScheduler (notifications + daily briefing)
   - Registers all API routers
-
-Existing health-check endpoints (/  /db-test  /tables) are preserved.
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, inspect
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 from backend.database import engine, Base
 from backend.core.config import get_settings
 from backend.core.dependencies import get_db
+from backend.scheduler.scheduler import start_scheduler, stop_scheduler
 
 # ── CRITICAL: Import ALL models BEFORE create_all() ──────────────────────────
 # This registers every table with Base.metadata.
@@ -27,18 +29,43 @@ from backend.models.user import User                          # noqa: F401
 from backend.models.otp_verification import OTPVerification  # noqa: F401
 from backend.models.session import UserSession                # noqa: F401
 from backend.models.telegram_account import TelegramAccount  # noqa: F401
+from backend.models.event import Event                        # noqa: F401
+from backend.models.notification import Notification          # noqa: F401
+from backend.models.expense import Expense, Budget            # noqa: F401
+from backend.models.activity_log import ActivityLog           # noqa: F401
+from backend.models.recommendation import Recommendation, AIInsight  # noqa: F401
+from backend.models.streak import Streak                      # noqa: F401
 
-# ── Routers ───────────────────────────────────────────────────────────────────
+# ── Routers ──────────────────────────────────────────────────────────
 from backend.api.auth import router as auth_router
 from backend.api.telegram import router as telegram_router
+from backend.api.events import router as events_router
+from backend.api.schedule import router as schedule_router
+from backend.api.overview import router as overview_router
+from backend.api.expenses import router as expenses_router
+from backend.api.budget import router as budget_router
+from backend.api.analytics import router as analytics_router
+from backend.api.ai import router as ai_router
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ── Lifespan (startup + shutdown) ────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ────────────────────────────────────────────────────
+    Base.metadata.create_all(bind=engine)   # create new tables
+    start_scheduler()                        # start APScheduler jobs
+    yield
+    # ── Shutdown ───────────────────────────────────────────────────
+    stop_scheduler()
+
+
+# ── App ───────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="TimePilot AI",
     description="AI-powered scheduling assistant backend",
-    version="0.2.0",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # ── CORS (permit Next.js frontend on any origin during development) ────────────
@@ -50,14 +77,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Database table creation on startup ───────────────────────────────────────
-# create_all() only creates tables that don't exist yet — it does NOT alter
-# existing tables. If your schema changed, run: python scripts/reset_auth_tables.py
-Base.metadata.create_all(bind=engine)
-
 # ── Register routers ──────────────────────────────────────────────────────────
 app.include_router(auth_router)
 app.include_router(telegram_router)
+app.include_router(events_router)
+app.include_router(schedule_router)
+app.include_router(overview_router)
+app.include_router(expenses_router)
+app.include_router(budget_router)
+app.include_router(analytics_router)
+app.include_router(ai_router)
 
 
 # =============================================================================
@@ -151,6 +180,22 @@ def schema_check():
             else "Run: python scripts/reset_auth_tables.py to fix mismatches"
         ),
     }
+
+
+@app.get("/debug/events-count", tags=["Debug"])
+def debug_events_count(db: Session = Depends(get_db)):
+    """
+    DEBUG ONLY — Returns the total number of events in the database.
+    Use this to verify the events table was created and data is being saved.
+    Example: GET /debug/events-count
+    """
+    settings = get_settings()
+    if not settings.DEBUG:
+        return {"error": "Debug endpoints are disabled. Set DEBUG=true in .env"}
+
+    from backend.repositories.event_repository import EventRepository
+    count = EventRepository.count_all(db)
+    return {"count": count}
 
 
 @app.get("/debug/otp-check", tags=["Debug"])

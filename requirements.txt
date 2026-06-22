@@ -9,3 +9,5 @@ python-jose[cryptography]
 passlib[bcrypt]
 httpx
 python-multipart
+google-generativeai
+apscheduler

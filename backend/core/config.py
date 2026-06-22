@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # ── Telegram ──────────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
 
+    # ── Gemini ────────────────────────────────────────────────────────────────
+    GEMINI_API_KEY: str = ""
+
     # ── App ───────────────────────────────────────────────────────────────────
     # Set DEBUG=true in Railway Variables to expose OTP in response
     DEBUG: bool = False

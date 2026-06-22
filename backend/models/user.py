@@ -13,14 +13,22 @@ from backend.database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    phone_number = Column(String(20), unique=True, nullable=False, index=True)
-    full_name = Column(String(150), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_verified = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    id            = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    phone_number  = Column(String(20), unique=True, nullable=False, index=True)
+    full_name     = Column(String(150), nullable=True)
+    is_active     = Column(Boolean, default=True, nullable=False)
+    is_verified   = Column(Boolean, default=False, nullable=False)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # ── Relationships ─────────────────────────────────────────────────────────
-    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    sessions         = relationship("UserSession",    back_populates="user", cascade="all, delete-orphan")
     telegram_account = relationship("TelegramAccount", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    events           = relationship("Event",          back_populates="user", cascade="all, delete-orphan")
+    notifications    = relationship("Notification",   back_populates="user", cascade="all, delete-orphan")
+    expenses         = relationship("Expense",        back_populates="user", cascade="all, delete-orphan")
+    budgets          = relationship("Budget",         back_populates="user", cascade="all, delete-orphan")
+    activity_logs    = relationship("ActivityLog",    back_populates="user", cascade="all, delete-orphan")
+    recommendations  = relationship("Recommendation", back_populates="user", cascade="all, delete-orphan")
+    ai_insights      = relationship("AIInsight",      back_populates="user", cascade="all, delete-orphan")
+    streaks          = relationship("Streak",         back_populates="user", cascade="all, delete-orphan")
