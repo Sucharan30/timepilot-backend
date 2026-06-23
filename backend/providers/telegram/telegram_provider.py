@@ -38,7 +38,7 @@ class TelegramProvider(TelegramProviderBase):
             return False
 
         url     = f"{_API_BASE}/sendMessage"
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
@@ -121,7 +121,7 @@ class TelegramProvider(TelegramProviderBase):
                 }
                 self.send_message(
                     chat_id,
-                    "👋 *Welcome to TimePilot AI!*\n\n"
+                    "👋 <b>Welcome to TimePilot AI!</b>\n\n"
                     "To link your Telegram to your TimePilot account, please tap the button below to share your phone number.",
                     reply_markup=keyboard
                 )
@@ -131,12 +131,12 @@ class TelegramProvider(TelegramProviderBase):
 
         # Already linked
         self.send_message(chat_id,
-            "👋 *Hello! I am TimePilot AI.*\n\n"
+            "👋 <b>Hello! I am TimePilot AI.</b>\n\n"
             "Here's what I can do:\n"
-            "• `show today's schedule` — see today's events\n"
-            "• `Meeting Friday 3 PM` — schedule an event\n"
-            "• `Spent ₹500 on food` — log an expense\n"
-            "• `confirm` / `cancel` — confirm or cancel a pending action"
+            "• <code>show today's schedule</code> — see today's events\n"
+            "• <code>Meeting Friday 3 PM</code> — schedule an event\n"
+            "• <code>Spent ₹500 on food</code> — log an expense\n"
+            "• <code>confirm</code> / <code>cancel</code> — confirm or cancel a pending action"
         )
 
     def _handle_contact(self, chat_id, contact: dict) -> None:
@@ -179,9 +179,9 @@ class TelegramProvider(TelegramProviderBase):
             remove_kb = {"remove_keyboard": True}
             self.send_message(
                 chat_id,
-                "✅ *Account Linked Successfully!*\n\n"
+                "✅ <b>Account Linked Successfully!</b>\n\n"
                 "You can now manage your schedule and expenses directly from Telegram.\n"
-                "Try saying: `show today's schedule`",
+                "Try saying: <code>show today's schedule</code>",
                 reply_markup=remove_kb
             )
         except Exception as exc:
@@ -210,11 +210,11 @@ class TelegramProvider(TelegramProviderBase):
 
             events = EventRepository.get_today_for_user(db, account.user_id)
             if not events:
-                self.send_message(chat_id, "📅 *Today's Schedule*\n\nNo events scheduled for today. Enjoy your free time! 🎉")
+                self.send_message(chat_id, "📅 <b>Today's Schedule</b>\n\nNo events scheduled for today. Enjoy your free time! 🎉")
                 return
 
-            lines = "\n".join([f"  • {e.start_datetime.strftime('%I:%M %p')} — *{e.title}*" for e in events])
-            self.send_message(chat_id, f"📅 *Today's Schedule*\n\n{lines}")
+            lines = "\n".join([f"  • {e.start_datetime.strftime('%I:%M %p')} — <b>{e.title}</b>" for e in events])
+            self.send_message(chat_id, f"📅 <b>Today's Schedule</b>\n\n{lines}")
         finally:
             db.close()
 
@@ -232,11 +232,11 @@ class TelegramProvider(TelegramProviderBase):
 
         self.send_message(
             chat_id,
-            f"💰 *Confirm Expense*\n\n"
-            f"  Amount:      ₹{parsed['amount']}\n"
-            f"  Category:    {parsed['category']}\n"
+            f"💰 <b>Confirm Expense</b>\n\n"
+            f"  Amount:      ₹{parsed.get('amount', '0')}\n"
+            f"  Category:    {parsed.get('category', 'unknown')}\n"
             f"  Description: {parsed.get('description') or '—'}\n\n"
-            f"Reply *confirm* to save or *cancel* to discard."
+            f"Reply <b>confirm</b> to save or <b>cancel</b> to discard."
         )
 
     # ── Schedule NLP Flow ─────────────────────────────────────────────────────
@@ -253,12 +253,12 @@ class TelegramProvider(TelegramProviderBase):
 
         self.send_message(
             chat_id,
-            f"📅 *Confirm Event*\n\n"
+            f"📅 <b>Confirm Event</b>\n\n"
             f"  Title:  {parsed.get('title', '—')}\n"
             f"  Type:   {parsed.get('event_type', '—')}\n"
             f"  Date:   {parsed.get('date') or '—'}\n"
             f"  Time:   {parsed.get('time') or '—'}\n\n"
-            f"Reply *confirm* to save or *cancel* to discard."
+            f"Reply <b>confirm</b> to save or <b>cancel</b> to discard."
         )
 
     # ── Confirm / Cancel ──────────────────────────────────────────────────────
@@ -274,10 +274,10 @@ class TelegramProvider(TelegramProviderBase):
         elif pending["type"] == "schedule":
             self.send_message(
                 chat_id,
-                "✅ *Event noted!*\n\n"
+                "✅ <b>Event noted!</b>\n\n"
                 "To set the exact date/time, please use the TimePilot app "
                 "or call POST /schedule/confirm with the full datetime.\n\n"
-                f"Title: *{pending['data'].get('title', '—')}*"
+                f"Title: <b>{pending['data'].get('title', '—')}</b>"
             )
 
     def _handle_cancel(self, chat_id) -> None:
@@ -308,7 +308,7 @@ class TelegramProvider(TelegramProviderBase):
                 description=data.get("description"),
                 expense_date=datetime.now(timezone.utc),
             )
-            self.send_message(chat_id, f"✅ *Expense saved!*\n₹{data['amount']} on {data['category']} logged successfully.")
+            self.send_message(chat_id, f"✅ <b>Expense saved!</b>\n₹{data.get('amount', 0)} on {data.get('category', 'misc')} logged successfully.")
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ Failed to save expense: {exc}")
         finally:
