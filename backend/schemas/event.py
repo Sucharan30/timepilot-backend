@@ -59,6 +59,14 @@ class EventResponse(BaseModel):
     created_at:     datetime
     updated_at:     datetime
 
+    @field_validator("start_datetime", "end_datetime", "created_at", "updated_at", mode="after")
+    @classmethod
+    def ensure_timezone(cls, v: Optional[datetime]) -> Optional[datetime]:
+        from datetime import timezone
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
     model_config = {"from_attributes": True}
 
 

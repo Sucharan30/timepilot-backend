@@ -32,13 +32,15 @@ class TelegramProvider(TelegramProviderBase):
 
     # ── Send ──────────────────────────────────────────────────────────────────
 
-    def send_message(self, chat_id: str | int, text: str) -> bool:
+    def send_message(self, chat_id: str | int, text: str, reply_markup: dict = None) -> bool:
         if not settings.TELEGRAM_BOT_TOKEN:
             print("[TelegramProvider] TELEGRAM_BOT_TOKEN is not set. Skipping send.")
             return False
 
         url     = f"{_API_BASE}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
 
         try:
             response = httpx.post(url, json=payload, timeout=10)
@@ -56,10 +58,18 @@ class TelegramProvider(TelegramProviderBase):
             return
 
         chat_id  = message.get("chat", {}).get("id")
-        text     = (message.get("text") or "").strip()
         user_obj = message.get("from", {})
+        
+        if not chat_id:
+            return
 
-        if not chat_id or not text:
+        # ── Contact Sharing (Account Linking) ─────────────────────────────────
+        if "contact" in message:
+            self._handle_contact(chat_id, message["contact"])
+            return
+
+        text = (message.get("text") or "").strip()
+        if not text:
             return
 
         text_lower = text.lower()
@@ -74,14 +84,7 @@ class TelegramProvider(TelegramProviderBase):
 
         # ── Hello / greeting ──────────────────────────────────────────────────
         if text_lower in ("hello", "hi", "hey", "/start"):
-            self.send_message(chat_id,
-                "👋 *Hello! I am TimePilot AI.*\n\n"
-                "Here's what I can do:\n"
-                "• `show today's schedule` — see today's events\n"
-                "• `Meeting Friday 3 PM` — schedule an event\n"
-                "• `Spent ₹500 on food` — log an expense\n"
-                "• `confirm` / `cancel` — confirm or cancel a pending action"
-            )
+            self._handle_start(chat_id)
             return
 
         # ── Today's schedule ──────────────────────────────────────────────────
@@ -96,6 +99,96 @@ class TelegramProvider(TelegramProviderBase):
 
         # ── Schedule detection: everything else goes to schedule parser ───────
         self._handle_schedule_nlp(chat_id, text)
+
+    # ── Authentication / Start ────────────────────────────────────────────────
+
+    def _handle_start(self, chat_id) -> None:
+        from backend.database import SessionLocal
+        from backend.models.telegram_account import TelegramAccount
+        
+        db = SessionLocal()
+        try:
+            account = db.query(TelegramAccount).filter(
+                TelegramAccount.telegram_chat_id == str(chat_id)
+            ).first()
+            
+            if not account or not account.is_connected:
+                # Ask for phone number
+                keyboard = {
+                    "keyboard": [[{"text": "📱 Share Phone Number", "request_contact": True}]],
+                    "resize_keyboard": True,
+                    "one_time_keyboard": True
+                }
+                self.send_message(
+                    chat_id,
+                    "👋 *Welcome to TimePilot AI!*\n\n"
+                    "To link your Telegram to your TimePilot account, please tap the button below to share your phone number.",
+                    reply_markup=keyboard
+                )
+                return
+        finally:
+            db.close()
+
+        # Already linked
+        self.send_message(chat_id,
+            "👋 *Hello! I am TimePilot AI.*\n\n"
+            "Here's what I can do:\n"
+            "• `show today's schedule` — see today's events\n"
+            "• `Meeting Friday 3 PM` — schedule an event\n"
+            "• `Spent ₹500 on food` — log an expense\n"
+            "• `confirm` / `cancel` — confirm or cancel a pending action"
+        )
+
+    def _handle_contact(self, chat_id, contact: dict) -> None:
+        phone_number = contact.get("phone_number")
+        if not phone_number:
+            return
+            
+        # Standardize phone number (add + if missing)
+        if not phone_number.startswith("+"):
+            phone_number = "+" + phone_number
+            
+        from backend.database import SessionLocal
+        from backend.models.user import User
+        from backend.models.telegram_account import TelegramAccount
+        
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.phone_number == phone_number).first()
+            if not user:
+                # Remove custom keyboard
+                remove_kb = {"remove_keyboard": True}
+                self.send_message(
+                    chat_id, 
+                    f"⚠️ No TimePilot account found with `{phone_number}`.\n\n"
+                    "Please log into the web app first, then come back and type `/start` again.",
+                    reply_markup=remove_kb
+                )
+                return
+                
+            # Create or update TelegramAccount
+            account = db.query(TelegramAccount).filter(TelegramAccount.user_id == user.id).first()
+            if not account:
+                account = TelegramAccount(user_id=user.id)
+                db.add(account)
+                
+            account.telegram_chat_id = str(chat_id)
+            account.is_connected = True
+            db.commit()
+            
+            remove_kb = {"remove_keyboard": True}
+            self.send_message(
+                chat_id,
+                "✅ *Account Linked Successfully!*\n\n"
+                "You can now manage your schedule and expenses directly from Telegram.\n"
+                "Try saying: `show today's schedule`",
+                reply_markup=remove_kb
+            )
+        except Exception as exc:
+            self.send_message(chat_id, "⚠️ Failed to link account due to an internal error.")
+            print(f"[TelegramProvider] Contact linking error: {exc}")
+        finally:
+            db.close()
 
     # ── Today's Schedule ──────────────────────────────────────────────────────
 
