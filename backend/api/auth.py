@@ -21,6 +21,7 @@ from backend.schemas.auth import (
     SendOTPRequest,
     VerifyOTPRequest,
     RefreshTokenRequest,
+    UpdateProfileRequest,
 )
 from backend.schemas.response import ok, err
 from backend.schemas.user import UserOut
@@ -124,4 +125,20 @@ def me(current_user=Depends(get_current_user)):
     Returns the profile of the currently authenticated user.
     Requires: Authorization: Bearer <access_token>
     """
+    return ok(UserOut.model_validate(current_user).model_dump())
+
+
+# ── PUT /auth/me ──────────────────────────────────────────────────────────────
+
+@router.put("/me")
+def update_me(
+    body: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Update the authenticated user's profile (full_name)."""
+    if body.full_name is not None:
+        current_user.full_name = body.full_name.strip() or None
+        db.commit()
+        db.refresh(current_user)
     return ok(UserOut.model_validate(current_user).model_dump())

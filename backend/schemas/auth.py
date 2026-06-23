@@ -54,3 +54,9 @@ class RefreshTokenRequest(BaseModel):
 class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# ── /auth/me (PUT) ────────────────────────────────────────────────────────────
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
