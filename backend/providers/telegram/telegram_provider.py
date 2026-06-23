@@ -256,8 +256,7 @@ class TelegramProvider(TelegramProviderBase):
             f"📅 <b>Confirm Event</b>\n\n"
             f"  Title:  {parsed.get('title', '—')}\n"
             f"  Type:   {parsed.get('event_type', '—')}\n"
-            f"  Date:   {parsed.get('date') or '—'}\n"
-            f"  Time:   {parsed.get('time') or '—'}\n\n"
+            f"  Start:  {parsed.get('start_datetime', '—')}\n\n"
             f"Reply <b>confirm</b> to save or <b>cancel</b> to discard."
         )
 
@@ -272,13 +271,7 @@ class TelegramProvider(TelegramProviderBase):
         if pending["type"] == "expense":
             self._save_expense(chat_id, pending["data"])
         elif pending["type"] == "schedule":
-            self.send_message(
-                chat_id,
-                "✅ <b>Event noted!</b>\n\n"
-                "To set the exact date/time, please use the TimePilot app "
-                "or call POST /schedule/confirm with the full datetime.\n\n"
-                f"Title: <b>{pending['data'].get('title', '—')}</b>"
-            )
+            self._save_schedule(chat_id, pending["data"])
 
     def _handle_cancel(self, chat_id) -> None:
         _pending.pop(str(chat_id), None)
@@ -311,5 +304,50 @@ class TelegramProvider(TelegramProviderBase):
             self.send_message(chat_id, f"✅ <b>Expense saved!</b>\n₹{data.get('amount', 0)} on {data.get('category', 'misc')} logged successfully.")
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ Failed to save expense: {exc}")
+        finally:
+            db.close()
+
+    def _save_schedule(self, chat_id, data: dict) -> None:
+        from datetime import datetime
+        from backend.database import SessionLocal
+        from backend.models.telegram_account import TelegramAccount
+        from backend.repositories.event_repository import EventRepository
+        from backend.models.event import EventType
+
+        db = SessionLocal()
+        try:
+            account = db.query(TelegramAccount).filter(
+                TelegramAccount.telegram_chat_id == str(chat_id)
+            ).first()
+            if not account:
+                self.send_message(chat_id, "⚠️ Account not linked. Please log in via the app first.")
+                return
+
+            try:
+                start_dt = datetime.fromisoformat(data["start_datetime"])
+                end_dt = datetime.fromisoformat(data["end_datetime"]) if data.get("end_datetime") else None
+            except (ValueError, KeyError, TypeError):
+                self.send_message(chat_id, "⚠️ Failed to parse the exact date and time. Please schedule via the web app.")
+                return
+
+            # Ensure enum matches
+            event_type_str = data.get("event_type", "meeting")
+            try:
+                event_type = EventType(event_type_str)
+            except ValueError:
+                event_type = EventType.meeting
+
+            EventRepository.create(
+                db=db,
+                user_id=account.user_id,
+                title=data.get("title", "Event"),
+                description=data.get("notes"),
+                event_type=event_type,
+                start_datetime=start_dt,
+                end_datetime=end_dt
+            )
+            self.send_message(chat_id, f"✅ <b>Event scheduled!</b>\n<b>{data.get('title')}</b> is now on your calendar.")
+        except Exception as exc:
+            self.send_message(chat_id, f"⚠️ Failed to save event: {exc}")
         finally:
             db.close()

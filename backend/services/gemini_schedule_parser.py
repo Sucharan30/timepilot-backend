@@ -28,26 +28,23 @@ settings = get_settings()
 
 # ── Prompt template ───────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """You are a scheduling assistant that extracts structured data from natural language.
+def get_system_prompt() -> str:
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).astimezone().isoformat()
+    return f"""You are a scheduling assistant that extracts structured data from natural language.
+Today's current date and time is: {now_iso}
 
 Given a scheduling message, return ONLY valid JSON (no markdown, no explanation) with these keys:
-  - title      (string)              : short event title
-  - event_type (string)              : one of meeting, appointment, class, task, reminder, deadline
-  - date       (string or null)      : date as written by the user, e.g. "Friday", "June 25", "tomorrow"
-  - time       (string or null)      : time as written, e.g. "3 PM", "15:00", "morning"
-  - notes      (string or null)      : any extra details
+  - title          (string)              : short event title
+  - event_type     (string)              : one of meeting, appointment, class, task, reminder, deadline
+  - start_datetime (string)              : EXACT start datetime in ISO 8601 format (e.g. "2026-06-24T15:00:00+05:30"). Calculate this based on the user's message and today's date.
+  - end_datetime   (string or null)      : EXACT end datetime in ISO 8601 format, or null if not specified.
+  - notes          (string or null)      : any extra details
 
 Examples:
   Input:  "Team standup tomorrow at 9am"
-  Output: {"title":"Team standup","event_type":"meeting","date":"tomorrow","time":"9am","notes":null}
-
-  Input:  "Doctor appointment next Monday 2 PM"
-  Output: {"title":"Doctor appointment","event_type":"appointment","date":"next Monday","time":"2 PM","notes":null}
-
-  Input:  "Submit project deadline Friday"
-  Output: {"title":"Submit project","event_type":"deadline","date":"Friday","time":null,"notes":null}
+  Output: {{"title":"Team standup","event_type":"meeting","start_datetime":"2026-06-24T09:00:00+05:30","end_datetime":null,"notes":null}}
 """
-
 
 # ── Parser ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +70,7 @@ class GeminiScheduleParser:
             genai.configure(api_key=settings.GEMINI_API_KEY)
             self._client = genai.GenerativeModel(
                 model_name="gemini-2.5-flash",
-                system_instruction=_SYSTEM_PROMPT,
+                system_instruction=get_system_prompt(),
             )
         except ImportError:
             raise HTTPException(
@@ -91,6 +88,12 @@ class GeminiScheduleParser:
         model = self._get_client()
 
         try:
+            # We recreate the model to inject the current time into system_instruction
+            import google.generativeai as genai
+            model = genai.GenerativeModel(
+                model_name="gemini-2.5-flash",
+                system_instruction=get_system_prompt(),
+            )
             response = model.generate_content(message)
             raw_text = response.text.strip()
         except Exception as exc:
