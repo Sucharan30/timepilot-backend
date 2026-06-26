@@ -27,8 +27,8 @@ def get_overview(
       - tasks_due:              task-type events due today
       - upcoming_notifications: next 10 unsent notifications
     """
-    today_events = EventRepository.get_today_for_user(db, current_user.id)
-    tasks_due    = EventRepository.get_tasks_due_today(db, current_user.id)
+    today_events = EventRepository.get_today_for_user(db, current_user.id, current_user.timezone)
+    tasks_due    = EventRepository.get_tasks_due_today(db, current_user.id, current_user.timezone)
     upcoming     = NotificationRepository.get_upcoming_for_user(db, current_user.id, limit=10)
 
     return ok({

@@ -64,11 +64,10 @@ class EventRepository:
         )
 
     @staticmethod
-    def get_today_for_user(db: Session, user_id: int) -> List[Event]:
-        """Return events whose start_datetime falls within today (UTC)."""
-        now_utc   = datetime.now(timezone.utc)
-        day_start = now_utc.replace(hour=0,  minute=0,  second=0,  microsecond=0)
-        day_end   = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+    def get_today_for_user(db: Session, user_id: int, timezone_str: Optional[str] = None) -> List[Event]:
+        """Return events whose start_datetime falls within the user's local today (UTC)."""
+        from backend.services.timezone_service import TimezoneService
+        day_start, day_end = TimezoneService.day_bounds_utc(timezone_str)
         return (
             db.query(Event)
             .filter(
@@ -103,11 +102,10 @@ class EventRepository:
         return q.order_by(Event.start_datetime.asc()).all()
 
     @staticmethod
-    def get_tasks_due_today(db: Session, user_id: int) -> List[Event]:
-        """Return task-type events due today (UTC)."""
-        now_utc   = datetime.now(timezone.utc)
-        day_start = now_utc.replace(hour=0,  minute=0,  second=0,  microsecond=0)
-        day_end   = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+    def get_tasks_due_today(db: Session, user_id: int, timezone_str: Optional[str] = None) -> List[Event]:
+        """Return task-type events due today (in user's local timezone)."""
+        from backend.services.timezone_service import TimezoneService
+        day_start, day_end = TimezoneService.day_bounds_utc(timezone_str)
         return (
             db.query(Event)
             .filter(
