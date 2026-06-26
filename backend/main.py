@@ -60,6 +60,48 @@ from backend.api.sse import router as sse_router
 async def lifespan(app: FastAPI):
     # ── Startup ────────────────────────────────────────────────────
     Base.metadata.create_all(bind=engine)   # create new tables
+    
+    # Auto-migrate missing columns for existing users table
+    try:
+        with engine.begin() as conn:
+            # Add timezone column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN timezone VARCHAR(100) NOT NULL DEFAULT 'Asia/Kolkata';"))
+            except Exception:
+                pass
+            
+            # Add briefing_time column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN briefing_time VARCHAR(5) NOT NULL DEFAULT '07:00';"))
+            except Exception:
+                pass
+            
+            # Add notification_enabled column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN notification_enabled BOOLEAN NOT NULL DEFAULT 1;"))
+            except Exception:
+                pass
+            
+            # Add reminder_minutes column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN reminder_minutes INTEGER NOT NULL DEFAULT 15;"))
+            except Exception:
+                pass
+            
+            # Add briefing_enabled column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN briefing_enabled BOOLEAN NOT NULL DEFAULT 1;"))
+            except Exception:
+                pass
+            
+            # Add notification_categories column if missing
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN notification_categories VARCHAR(255) NOT NULL DEFAULT 'meeting,appointment,task,class,deadline,reminder';"))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Migration error: {e}")
+
     start_scheduler()                        # start APScheduler jobs
     yield
     # ── Shutdown ───────────────────────────────────────────────────
