@@ -45,3 +45,13 @@ def monthly_analytics(
     """Returns analytics summary for the current month (1st–today UTC)."""
     result = AnalyticsService.monthly(user_id=current_user.id, db=db)
     return ok(result.model_dump())
+
+
+@router.get("/yearly")
+def yearly_analytics(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Returns analytics summary for the current year (Jan 1st–today UTC)."""
+    result = AnalyticsService.yearly(user_id=current_user.id, db=db)
+    return ok(result.model_dump())

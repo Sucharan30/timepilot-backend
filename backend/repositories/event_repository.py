@@ -82,6 +82,27 @@ class EventRepository:
         )
 
     @staticmethod
+    def get_for_period(
+        db: Session,
+        user_id: int,
+        start_dt: datetime,
+        end_dt: datetime,
+        status_filter: EventStatus = EventStatus.scheduled,
+    ) -> List[Event]:
+        """
+        Return events within an arbitrary period (used for timezone-correct day queries).
+        start_dt and end_dt should be UTC-aware datetimes.
+        """
+        q = db.query(Event).filter(
+            Event.user_id == user_id,
+            Event.start_datetime >= start_dt,
+            Event.start_datetime <= end_dt,
+        )
+        if status_filter is not None:
+            q = q.filter(Event.status == status_filter)
+        return q.order_by(Event.start_datetime.asc()).all()
+
+    @staticmethod
     def get_tasks_due_today(db: Session, user_id: int) -> List[Event]:
         """Return task-type events due today (UTC)."""
         now_utc   = datetime.now(timezone.utc)

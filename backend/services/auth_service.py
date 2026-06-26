@@ -22,20 +22,28 @@ from backend.schemas.user import UserOut
 
 class AuthService:
 
-    # ── Send OTP ──────────────────────────────────────────────────────────────
+    # ── Send OTP (Telegram redirect) ─────────────────────────────────────────
 
     @staticmethod
     def send_otp(phone_number: str, db: Session, debug: bool = False) -> dict:
         """
-        Generate and store an OTP for the given phone number.
-        Returns the response dict (includes 'otp' only in debug mode).
-        """
-        otp_code = OTPService.generate_and_store_otp(phone_number, db)
+        POST /auth/send-otp — maintained for frontend compatibility.
 
-        response: dict = {"message": "OTP generated. Please verify to continue."}
-        if debug:
-            response["otp"] = otp_code  # Only exposed in DEBUG mode
-        return response
+        The OTP is no longer delivered via SMS. Instead, users receive it
+        through the TimePilot Telegram Bot when they send /code or share
+        their phone contact.
+
+        This endpoint now returns a friendly instruction message so the
+        frontend can display it to the user without any code changes.
+        """
+        return {
+            "message": (
+                "Open the TimePilot Telegram Bot to receive your login code. "
+                "Send /code to the bot if you've used TimePilot before, "
+                "or /start to link your account for the first time."
+            ),
+            "telegram_bot": "https://t.me/timepilot_ai_bot",
+        }
 
     # ── Verify OTP ────────────────────────────────────────────────────────────
 

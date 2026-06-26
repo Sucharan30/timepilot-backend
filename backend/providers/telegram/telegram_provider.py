@@ -1,21 +1,25 @@
 """
 backend/providers/telegram/telegram_provider.py
 
-Concrete Telegram provider with full command handling.
+Concrete Telegram provider with full command handling and authentication.
 
-Supported commands / messages:
-  "Hello"                  → greeting
-  "show today's schedule"  → list today's events
+Authentication commands:
+  /start   → if new: ask for phone | if returning: send OTP immediately
+  /code    → generate + send OTP for returning users
+  /login   → alias for /code
+
+NLP commands:
+  "show today's schedule"  → list today's events (timezone-correct)
   "Spent ₹500 on food"     → expense NLP → confirmation flow
   "Meeting Friday 3 PM"    → schedule NLP → confirmation flow
   "confirm"                → save pending action
   "cancel"                 → discard pending action
 
-Confirmation flow uses an in-memory pending store keyed by chat_id.
-(For multi-process Railway deployments, replace with Redis or DB table.)
+Timezone fix:
+  All datetime displays are converted to user's local timezone before sending.
 """
 import httpx
-from typing import Any
+from typing import Any, Optional
 
 from backend.providers.telegram.base import TelegramProviderBase
 from backend.core.config import get_settings
@@ -59,13 +63,13 @@ class TelegramProvider(TelegramProviderBase):
 
         chat_id  = message.get("chat", {}).get("id")
         user_obj = message.get("from", {})
-        
+
         if not chat_id:
             return
 
-        # ── Contact Sharing (Account Linking) ─────────────────────────────────
+        # ── Contact Sharing (First-time Account Linking + OTP) ─────────────────
         if "contact" in message:
-            self._handle_contact(chat_id, message["contact"])
+            self._handle_contact(chat_id, message["contact"], user_obj)
             return
 
         text = (message.get("text") or "").strip()
@@ -82,9 +86,13 @@ class TelegramProvider(TelegramProviderBase):
             self._handle_cancel(chat_id)
             return
 
-        # ── Hello / greeting ──────────────────────────────────────────────────
-        if text_lower in ("hello", "hi", "hey", "/start"):
-            self._handle_start(chat_id)
+        # ── Authentication commands ───────────────────────────────────────────
+        if text_lower in ("/start", "start"):
+            self._handle_start(chat_id, user_obj)
+            return
+
+        if text_lower in ("/code", "/login", "code", "login"):
+            self._handle_login_code(chat_id)
             return
 
         # ── Today's schedule ──────────────────────────────────────────────────
@@ -92,129 +100,139 @@ class TelegramProvider(TelegramProviderBase):
             self._handle_today_schedule(chat_id, user_obj)
             return
 
-        # ── Expense detection: contains currency keywords ─────────────────────
+        # ── Expense detection ─────────────────────────────────────────────────
         if any(kw in text_lower for kw in ("spent", "spend", "₹", "rs", "rupee", "bought", "paid")):
             self._handle_expense_nlp(chat_id, text)
             return
 
-        # ── Schedule detection: everything else goes to schedule parser ───────
+        # ── Schedule detection (fallback) ─────────────────────────────────────
         self._handle_schedule_nlp(chat_id, text)
 
-    # ── Authentication / Start ────────────────────────────────────────────────
+    # ── /start ────────────────────────────────────────────────────────────────
 
-    def _handle_start(self, chat_id) -> None:
+    def _handle_start(self, chat_id, user_obj: dict) -> None:
         from backend.database import SessionLocal
-        from backend.models.telegram_account import TelegramAccount
-        
+        from backend.repositories.telegram_repository import TelegramRepository
+
         db = SessionLocal()
         try:
-            account = db.query(TelegramAccount).filter(
-                TelegramAccount.telegram_chat_id == str(chat_id)
-            ).first()
-            
-            if not account or not account.is_connected:
-                # Ask for phone number
-                keyboard = {
-                    "keyboard": [[{"text": "📱 Share Phone Number", "request_contact": True}]],
-                    "resize_keyboard": True,
-                    "one_time_keyboard": True
-                }
-                self.send_message(
-                    chat_id,
-                    "👋 <b>Welcome to TimePilot AI!</b>\n\n"
-                    "To link your Telegram to your TimePilot account, please tap the button below to share your phone number.",
-                    reply_markup=keyboard
-                )
+            account = TelegramRepository.get_by_chat_id(db, str(chat_id))
+
+            if account and account.is_connected:
+                # Returning user — send OTP directly instead of asking for phone again
+                self._handle_login_code(chat_id)
                 return
+
+            # New user — ask for phone number
+            keyboard = {
+                "keyboard": [[{"text": "📱 Share Phone Number", "request_contact": True}]],
+                "resize_keyboard": True,
+                "one_time_keyboard": True
+            }
+            self.send_message(
+                chat_id,
+                "👋 <b>Welcome to TimePilot AI!</b>\n\n"
+                "To create or link your account, please tap the button below to share your phone number.\n\n"
+                "You'll receive a login code here on Telegram.",
+                reply_markup=keyboard
+            )
         finally:
             db.close()
 
-        # Already linked
-        self.send_message(chat_id,
-            "👋 <b>Hello! I am TimePilot AI.</b>\n\n"
-            "Here's what I can do:\n"
-            "• <code>show today's schedule</code> — see today's events\n"
-            "• <code>Meeting Friday 3 PM</code> — schedule an event\n"
-            "• <code>Spent ₹500 on food</code> — log an expense\n"
-            "• <code>confirm</code> / <code>cancel</code> — confirm or cancel a pending action"
-        )
+    # ── /code or /login ───────────────────────────────────────────────────────
 
-    def _handle_contact(self, chat_id, contact: dict) -> None:
+    def _handle_login_code(self, chat_id) -> None:
+        """Generate and send OTP to a returning user."""
+        from backend.database import SessionLocal
+        from backend.services.telegram_auth_service import TelegramAuthService
+
+        db = SessionLocal()
+        try:
+            TelegramAuthService.handle_returning_user_code(
+                chat_id=str(chat_id),
+                db=db,
+                send_message_fn=self.send_message,
+            )
+        finally:
+            db.close()
+
+    # ── Contact Sharing → First-time OTP ──────────────────────────────────────
+
+    def _handle_contact(self, chat_id, contact: dict, user_obj: dict) -> None:
         phone_number = contact.get("phone_number")
         if not phone_number:
             return
-            
+
         # Standardize phone number (add + if missing)
         if not phone_number.startswith("+"):
             phone_number = "+" + phone_number
-            
+
+        telegram_username = user_obj.get("username")
+
         from backend.database import SessionLocal
-        from backend.models.user import User
-        from backend.models.telegram_account import TelegramAccount
-        
+        from backend.services.telegram_auth_service import TelegramAuthService
+
+        # Remove custom keyboard first
+        remove_kb = {"remove_keyboard": True}
+        self.send_message(chat_id, "📱 Phone number received! Generating your login code...", reply_markup=remove_kb)
+
         db = SessionLocal()
         try:
-            user = db.query(User).filter(User.phone_number == phone_number).first()
-            if not user:
-                # Remove custom keyboard
-                remove_kb = {"remove_keyboard": True}
-                self.send_message(
-                    chat_id, 
-                    f"⚠️ No TimePilot account found with `{phone_number}`.\n\n"
-                    "Please log into the web app first, then come back and type `/start` again.",
-                    reply_markup=remove_kb
-                )
-                return
-                
-            # Create or update TelegramAccount
-            account = db.query(TelegramAccount).filter(TelegramAccount.user_id == user.id).first()
-            if not account:
-                account = TelegramAccount(user_id=user.id)
-                db.add(account)
-                
-            account.telegram_chat_id = str(chat_id)
-            account.is_connected = True
-            db.commit()
-            
-            remove_kb = {"remove_keyboard": True}
-            self.send_message(
-                chat_id,
-                "✅ <b>Account Linked Successfully!</b>\n\n"
-                "You can now manage your schedule and expenses directly from Telegram.\n"
-                "Try saying: <code>show today's schedule</code>",
-                reply_markup=remove_kb
+            TelegramAuthService.handle_new_user_contact(
+                chat_id=str(chat_id),
+                phone_number=phone_number,
+                telegram_username=telegram_username,
+                db=db,
+                send_message_fn=self.send_message,
             )
         except Exception as exc:
-            self.send_message(chat_id, "⚠️ Failed to link account due to an internal error.")
-            print(f"[TelegramProvider] Contact linking error: {exc}")
+            self.send_message(chat_id, "⚠️ Failed to generate login code due to an internal error. Please try again.")
+            print(f"[TelegramProvider] Contact handling error: {exc}")
         finally:
             db.close()
 
-    # ── Today's Schedule ──────────────────────────────────────────────────────
+    # ── Today's Schedule (timezone-correct) ───────────────────────────────────
 
     def _handle_today_schedule(self, chat_id, user_obj: dict) -> None:
-        # We don't have user_id here — telegram_chat_id is the link.
-        # Lookup the user by chat_id in DB.
         from backend.database import SessionLocal
-        from backend.models.telegram_account import TelegramAccount
+        from backend.repositories.telegram_repository import TelegramRepository
         from backend.repositories.event_repository import EventRepository
+        from backend.repositories.user_repository import UserRepository
+        from backend.services.timezone_service import TimezoneService
 
         db = SessionLocal()
         try:
-            account = db.query(TelegramAccount).filter(
-                TelegramAccount.telegram_chat_id == str(chat_id)
-            ).first()
+            account = TelegramRepository.get_by_chat_id(db, str(chat_id))
             if not account:
-                self.send_message(chat_id, "⚠️ Your Telegram is not linked to a TimePilot account yet.\nPlease log in via the app first.")
+                self.send_message(
+                    chat_id,
+                    "⚠️ Your Telegram is not linked to a TimePilot account yet.\n"
+                    "Send /start to get started.",
+                )
                 return
 
-            events = EventRepository.get_today_for_user(db, account.user_id)
+            user = UserRepository.get_by_id(db, account.user_id)
+            user_tz = getattr(user, "timezone", "Asia/Kolkata") if user else "Asia/Kolkata"
+
+            # Get events for today in the user's local timezone
+            day_start, day_end = TimezoneService.day_bounds_utc(user_tz)
+            events = EventRepository.get_for_period(db, account.user_id, day_start, day_end)
+
             if not events:
-                self.send_message(chat_id, "📅 <b>Today's Schedule</b>\n\nNo events scheduled for today. Enjoy your free time! 🎉")
+                self.send_message(
+                    chat_id,
+                    "📅 <b>Today's Schedule</b>\n\nNo events scheduled for today. Enjoy your free time! 🎉"
+                )
                 return
 
-            lines = "\n".join([f"  • {e.start_datetime.strftime('%I:%M %p')} — <b>{e.title}</b>" for e in events])
-            self.send_message(chat_id, f"📅 <b>Today's Schedule</b>\n\n{lines}")
+            lines = []
+            for e in events:
+                # Convert UTC start time to user's local timezone for display
+                local_start = TimezoneService.to_user_tz(e.start_datetime, user_tz)
+                time_str = local_start.strftime("%I:%M %p") if local_start else "?"
+                lines.append(f"  • {time_str} — <b>{e.title}</b>")
+
+            self.send_message(chat_id, f"📅 <b>Today's Schedule</b>\n\n" + "\n".join(lines))
         finally:
             db.close()
 
@@ -281,16 +299,14 @@ class TelegramProvider(TelegramProviderBase):
         from datetime import datetime, timezone
         from decimal import Decimal
         from backend.database import SessionLocal
-        from backend.models.telegram_account import TelegramAccount
+        from backend.repositories.telegram_repository import TelegramRepository
         from backend.repositories.expense_repository import ExpenseRepository
 
         db = SessionLocal()
         try:
-            account = db.query(TelegramAccount).filter(
-                TelegramAccount.telegram_chat_id == str(chat_id)
-            ).first()
+            account = TelegramRepository.get_by_chat_id(db, str(chat_id))
             if not account:
-                self.send_message(chat_id, "⚠️ Account not linked. Please log in via the app first.")
+                self.send_message(chat_id, "⚠️ Account not linked. Please send /start first.")
                 return
 
             ExpenseRepository.create(
@@ -301,7 +317,18 @@ class TelegramProvider(TelegramProviderBase):
                 description=data.get("description"),
                 expense_date=datetime.now(timezone.utc),
             )
-            self.send_message(chat_id, f"✅ <b>Expense saved!</b>\n₹{data.get('amount', 0)} on {data.get('category', 'misc')} logged successfully.")
+            self.send_message(
+                chat_id,
+                f"✅ <b>Expense saved!</b>\n₹{data.get('amount', 0)} on {data.get('category', 'misc')} logged successfully."
+            )
+
+            # SSE broadcast
+            try:
+                from backend.api.sse import broadcast_event
+                broadcast_event(account.user_id, "budget_updated", {"source": "telegram"})
+            except Exception:
+                pass
+
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ Failed to save expense: {exc}")
         finally:
@@ -310,25 +337,37 @@ class TelegramProvider(TelegramProviderBase):
     def _save_schedule(self, chat_id, data: dict) -> None:
         from datetime import datetime
         from backend.database import SessionLocal
-        from backend.models.telegram_account import TelegramAccount
+        from backend.repositories.telegram_repository import TelegramRepository
         from backend.repositories.event_repository import EventRepository
+        from backend.repositories.user_repository import UserRepository
         from backend.models.event import EventType
+        from backend.services.timezone_service import TimezoneService
+        from backend.services.notification_service import NotificationService
 
         db = SessionLocal()
         try:
-            account = db.query(TelegramAccount).filter(
-                TelegramAccount.telegram_chat_id == str(chat_id)
-            ).first()
+            account = TelegramRepository.get_by_chat_id(db, str(chat_id))
             if not account:
-                self.send_message(chat_id, "⚠️ Account not linked. Please log in via the app first.")
+                self.send_message(chat_id, "⚠️ Account not linked. Please send /start first.")
                 return
 
+            user = UserRepository.get_by_id(db, account.user_id)
+            user_tz = getattr(user, "timezone", "Asia/Kolkata") if user else "Asia/Kolkata"
+
             try:
-                start_dt = datetime.fromisoformat(data["start_datetime"])
-                end_dt = datetime.fromisoformat(data["end_datetime"]) if data.get("end_datetime") else None
+                # Parse datetime from Gemini output
+                start_local = datetime.fromisoformat(data["start_datetime"])
+                end_local   = datetime.fromisoformat(data["end_datetime"]) if data.get("end_datetime") else None
             except (ValueError, KeyError, TypeError):
-                self.send_message(chat_id, "⚠️ Failed to parse the exact date and time. Please schedule via the web app.")
+                self.send_message(
+                    chat_id,
+                    "⚠️ Failed to parse the exact date and time. Please schedule via the web app."
+                )
                 return
+
+            # CRITICAL: Convert from user's local timezone to UTC before storing
+            start_utc = TimezoneService.to_utc(start_local, user_tz)
+            end_utc   = TimezoneService.to_utc(end_local, user_tz) if end_local else None
 
             # Ensure enum matches
             event_type_str = data.get("event_type", "meeting")
@@ -337,17 +376,46 @@ class TelegramProvider(TelegramProviderBase):
             except ValueError:
                 event_type = EventType.meeting
 
-            EventRepository.create(
+            event = EventRepository.create(
                 db=db,
                 user_id=account.user_id,
                 title=data.get("title", "Event"),
                 description=data.get("notes"),
                 event_type=event_type,
-                start_datetime=start_dt,
-                end_datetime=end_dt
+                start_datetime=start_utc,   # Always store UTC
+                end_datetime=end_utc,
             )
-            self.send_message(chat_id, f"✅ <b>Event scheduled!</b>\n<b>{data.get('title')}</b> is now on your calendar.")
+
+            # Auto-schedule notification
+            if user:
+                try:
+                    NotificationService.schedule_event_notification(db, event, user)
+                except Exception as exc:
+                    print(f"[TelegramProvider] Notification scheduling failed: {exc}")
+
+            # Show confirmation in user's local time
+            local_start = TimezoneService.to_user_tz(start_utc, user_tz)
+            time_str = local_start.strftime("%I:%M %p, %b %d") if local_start else str(start_utc)
+
+            self.send_message(
+                chat_id,
+                f"✅ <b>Event scheduled!</b>\n"
+                f"<b>{data.get('title')}</b> at {time_str} is now on your calendar."
+            )
+
+            # SSE broadcast
+            try:
+                from backend.api.sse import broadcast_event
+                broadcast_event(account.user_id, "event_created", {
+                    "event_id": event.id,
+                    "title": event.title,
+                    "source": "telegram",
+                })
+            except Exception:
+                pass
+
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ Failed to save event: {exc}")
+            print(f"[TelegramProvider] _save_schedule error: {exc}")
         finally:
             db.close()

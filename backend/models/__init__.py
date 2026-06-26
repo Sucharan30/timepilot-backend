@@ -15,3 +15,5 @@ from backend.models.expense import Expense, Budget            # noqa: F401
 from backend.models.activity_log import ActivityLog           # noqa: F401
 from backend.models.recommendation import Recommendation, AIInsight  # noqa: F401
 from backend.models.streak import Streak                      # noqa: F401
+from backend.models.saving_goal import SavingGoal             # noqa: F401
+from backend.models.reward import Reward                      # noqa: F401

@@ -102,3 +102,10 @@ class AnalyticsService:
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         end   = now
         return AnalyticsService._compute(user_id, db, start, end, "monthly")
+
+    @staticmethod
+    def yearly(user_id: int, db: Session) -> AnalyticsResponse:
+        now   = datetime.now(timezone.utc)
+        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end   = now
+        return AnalyticsService._compute(user_id, db, start, end, "yearly")

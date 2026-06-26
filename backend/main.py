@@ -35,6 +35,8 @@ from backend.models.expense import Expense, Budget            # noqa: F401
 from backend.models.activity_log import ActivityLog           # noqa: F401
 from backend.models.recommendation import Recommendation, AIInsight  # noqa: F401
 from backend.models.streak import Streak                      # noqa: F401
+from backend.models.saving_goal import SavingGoal             # noqa: F401
+from backend.models.reward import Reward                      # noqa: F401
 
 # ── Routers ──────────────────────────────────────────────────────────
 from backend.api.auth import router as auth_router
@@ -46,6 +48,12 @@ from backend.api.expenses import router as expenses_router
 from backend.api.budget import router as budget_router
 from backend.api.analytics import router as analytics_router
 from backend.api.ai import router as ai_router
+from backend.api.settings import router as settings_router
+from backend.api.search import router as search_router
+from backend.api.saving_goals import router as saving_goals_router
+from backend.api.streaks import router as streaks_router
+from backend.api.rewards import router as rewards_router
+from backend.api.sse import router as sse_router
 
 # ── Lifespan (startup + shutdown) ────────────────────────────────────────────────────
 @asynccontextmanager
@@ -87,6 +95,12 @@ app.include_router(expenses_router)
 app.include_router(budget_router)
 app.include_router(analytics_router)
 app.include_router(ai_router)
+app.include_router(settings_router)
+app.include_router(search_router)
+app.include_router(saving_goals_router)
+app.include_router(streaks_router)
+app.include_router(rewards_router)
+app.include_router(sse_router)
 
 
 # =============================================================================

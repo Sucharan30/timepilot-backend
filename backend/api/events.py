@@ -3,11 +3,15 @@ backend/api/events.py
 
 Event CRUD endpoints (all JWT-protected, user-scoped):
 
-  POST   /events           — create a new event
+  POST   /events           — create a new event (auto-schedules notification)
   GET    /events           — list all events for the current user
   GET    /events/{id}      — get a single event
   PUT    /events/{id}      — update an event (partial update)
   DELETE /events/{id}      — delete an event
+  GET    /events/stream    — SSE real-time stream (see sse.py)
+
+All datetime fields in responses are UTC ISO 8601.
+The frontend should convert to local time using the user's timezone from GET /auth/me.
 """
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
@@ -28,11 +32,15 @@ def create_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Create a new scheduled event for the authenticated user."""
+    """
+    Create a new scheduled event for the authenticated user.
+    Automatically schedules a Telegram reminder notification.
+    """
     event = EventService.create_event(
         user_id=current_user.id,
         payload=body,
         db=db,
+        user=current_user,     # Pass user for auto-notification scheduling
     )
     return ok(EventResponse.model_validate(event).model_dump())
 

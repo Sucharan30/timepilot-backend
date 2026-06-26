@@ -15,6 +15,7 @@ class UserOut(BaseModel):
     full_name: Optional[str] = None
     is_active: bool
     is_verified: bool
+    timezone: str = "Asia/Kolkata"
     created_at: datetime
 
     model_config = {"from_attributes": True}
