@@ -99,6 +99,18 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE users ADD COLUMN notification_categories VARCHAR(255) NOT NULL DEFAULT 'meeting,appointment,task,class,deadline,reminder';"))
             except Exception:
                 pass
+                
+            # Add telegram_chat_id to otp_verifications if missing
+            try:
+                conn.execute(text("ALTER TABLE otp_verifications ADD COLUMN telegram_chat_id VARCHAR(50) NULL;"))
+            except Exception:
+                pass
+                
+            # Add attempt_count to otp_verifications if missing
+            try:
+                conn.execute(text("ALTER TABLE otp_verifications ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;"))
+            except Exception:
+                pass
     except Exception as e:
         print(f"Migration error: {e}")
 
