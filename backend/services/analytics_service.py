@@ -29,6 +29,9 @@ def _score(study_min: int, meeting_min: int, total_events: int) -> float:
       - 30 pts: meeting balance (penalise excessive meetings)
       - 30 pts: event completion ratio (events logged vs 5 expected/day)
     """
+    if total_events == 0:
+        return 0.0
+
     study_score   = min(study_min / 120, 1.0) * 40
     meeting_score = max(0, 1 - meeting_min / 240) * 30
     event_score   = min(total_events / 5, 1.0) * 30
