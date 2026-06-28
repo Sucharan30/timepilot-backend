@@ -127,33 +127,37 @@ def confirm_study_plan(
 
     for session in body.sessions:
         try:
-            start_str = session.start_datetime.replace("Z", "+00:00")
-            end_str   = session.end_datetime.replace("Z", "+00:00")
-            start_local = datetime.fromisoformat(start_str)
-            end_local   = datetime.fromisoformat(end_str)
-        except ValueError:
+            from dateutil.parser import parse as parse_date
+            start_local = parse_date(session.start_datetime)
+            end_local   = parse_date(session.end_datetime)
+        except Exception as e:
             continue
 
         start_utc = TimezoneService.to_utc(start_local, user_tz)
         end_utc   = TimezoneService.to_utc(end_local, user_tz)
 
-        event = EventRepository.create(
-            db=db,
-            user_id=current_user.id,
-            title=session.title,
-            description=session.description,
-            event_type=EventType.study,
-            start_datetime=start_utc,
-            end_datetime=end_utc,
-        )
-
-        # Schedule reminder for each study session
         try:
-            NotificationService.schedule_event_notification(db, event, current_user)
-        except Exception:
-            pass
+            event = EventRepository.create(
+                db=db,
+                user_id=current_user.id,
+                title=session.title,
+                description=session.description,
+                event_type=EventType.study,
+                start_datetime=start_utc,
+                end_datetime=end_utc,
+            )
+            created_events.append(event.id)
+            
+            # Schedule reminder for each study session
+            try:
+                NotificationService.schedule_event_notification(db, event, current_user)
+            except Exception:
+                pass
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Database error saving session: {str(e)}")
 
-        created_events.append(event.id)
+    if not created_events and body.sessions:
+        raise HTTPException(status_code=400, detail="Failed to parse and save any sessions. The AI may have generated invalid dates.")
 
     # Broadcast SSE update
     try:

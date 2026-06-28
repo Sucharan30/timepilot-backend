@@ -132,11 +132,10 @@ def confirm_schedule(
 
     for ev in body.events:
         try:
-            start_str = ev.start_datetime.replace("Z", "+00:00")
-            end_str   = ev.end_datetime.replace("Z", "+00:00")
-            start_local = datetime.fromisoformat(start_str)
-            end_local   = datetime.fromisoformat(end_str)
-        except ValueError:
+            from dateutil.parser import parse as parse_date
+            start_local = parse_date(ev.start_datetime)
+            end_local   = parse_date(ev.end_datetime)
+        except Exception as e:
             continue
 
         start_utc = TimezoneService.to_utc(start_local, user_tz)
@@ -147,22 +146,28 @@ def confirm_schedule(
         except ValueError:
             event_type = EventType.meeting
 
-        event = EventRepository.create(
-            db=db,
-            user_id=current_user.id,
-            title=ev.title,
-            description=ev.description,
-            event_type=event_type,
-            start_datetime=start_utc,
-            end_datetime=end_utc,
-        )
-
         try:
-            NotificationService.schedule_event_notification(db, event, current_user)
-        except Exception:
-            pass
+            event = EventRepository.create(
+                db=db,
+                user_id=current_user.id,
+                title=ev.title,
+                description=ev.description,
+                event_type=event_type,
+                start_datetime=start_utc,
+                end_datetime=end_utc,
+            )
+            created_ids.append(event.id)
+            
+            try:
+                NotificationService.schedule_event_notification(db, event, current_user)
+            except Exception:
+                pass
+        except Exception as e:
+            # Catch DB constraints or enum errors
+            raise HTTPException(status_code=500, detail=f"Database error saving event: {str(e)}")
 
-        created_ids.append(event.id)
+    if not created_ids and body.events:
+        raise HTTPException(status_code=400, detail="Failed to parse and save any events. The AI may have generated invalid dates.")
 
     # Broadcast SSE
     try:

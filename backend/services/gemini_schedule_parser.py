@@ -31,19 +31,29 @@ settings = get_settings()
 def get_system_prompt() -> str:
     from datetime import datetime, timezone
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
-    return f"""You are a scheduling assistant that extracts structured data from natural language.
+    return f"""You are TimePilot AI, a productivity assistant.
 Today's current date and time is: {now_iso}
 
-Given a scheduling message, return ONLY valid JSON (no markdown, no explanation) with these keys:
+Given a message, determine if it is a scheduling request or a general conversation.
+Return ONLY valid JSON (no markdown, no explanation).
+
+If it is a scheduling request, return:
   - title          (string)              : short event title
   - event_type     (string)              : one of meeting, appointment, class, task, reminder, deadline
-  - start_datetime (string)              : EXACT start datetime in ISO 8601 format (e.g. "2026-06-24T15:00:00+05:30"). Calculate this based on the user's message and today's date.
-  - end_datetime   (string or null)      : EXACT end datetime in ISO 8601 format, or null if not specified.
+  - start_datetime (string)              : EXACT start datetime in ISO 8601 format
+  - end_datetime   (string or null)      : EXACT end datetime in ISO 8601 format
   - notes          (string or null)      : any extra details
+
+If it is a general conversation or question, return:
+  - is_conversational (boolean)          : true
+  - response          (string)           : Your friendly, helpful, and concise reply to the user.
 
 Examples:
   Input:  "Team standup tomorrow at 9am"
   Output: {{"title":"Team standup","event_type":"meeting","start_datetime":"2026-06-24T09:00:00+05:30","end_datetime":null,"notes":null}}
+  
+  Input:  "What is your name?"
+  Output: {{"is_conversational":true,"response":"I'm TimePilot AI, your personal productivity assistant! How can I help you today?"}}
 """
 
 # ── Parser ────────────────────────────────────────────────────────────────────

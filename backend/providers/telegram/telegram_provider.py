@@ -77,10 +77,14 @@ def detect_intent(text: str) -> str:
     if any(kw in t for kw in ("how am i", "how i am", "my status", "my stats", "my progress", "how doing")):
         return "status"
 
+    # Explicit CREATE commands (highest priority for schedule)
+    if any(kw in t for kw in ("schedule a", "schedule an", "create a", "add a", "remind me", "set a reminder", "book a")):
+        return "schedule_create"
+
     # Schedule VIEW
-    if "today" in t and any(kw in t for kw in ("schedule", "event", "plan", "calendar")):
+    if any(phrase in t for phrase in ("my schedule", "what is my schedule", "show my schedule", "today's schedule", "schedule for today")):
         return "schedule_today"
-    if "tomorrow" in t and any(kw in t for kw in ("schedule", "event", "plan")):
+    if any(phrase in t for phrase in ("tomorrow's schedule", "schedule for tomorrow")):
         return "schedule_tomorrow"
     if "upcoming" in t or ("next" in t and "schedule" in t):
         return "schedule_upcoming"
@@ -134,7 +138,7 @@ def detect_intent(text: str) -> str:
     if any(kw in t for kw in ("spent", "spend", "₹", "rs ", "rupee", "bought", "paid", "purchased", "expense")):
         return "expense_create"
 
-    # Schedule CREATE (default fallback to Gemini)
+    # Schedule CREATE / General Conversational Fallback
     return "schedule_create"
 
 
@@ -1133,6 +1137,10 @@ class TelegramProvider(TelegramProviderBase):
             parsed = gemini_parser.parse(text)
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ I didn't understand that. Try 'help' for a list of commands.\n\nError: {exc}")
+            return
+
+        if parsed.get("is_conversational"):
+            self.send_message(chat_id, parsed.get("response", "I'm not sure how to respond to that."))
             return
 
         if not parsed or not parsed.get("title"):
