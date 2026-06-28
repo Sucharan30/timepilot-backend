@@ -132,8 +132,10 @@ def confirm_schedule(
 
     for ev in body.events:
         try:
-            start_local = datetime.fromisoformat(ev.start_datetime)
-            end_local   = datetime.fromisoformat(ev.end_datetime)
+            start_str = ev.start_datetime.replace("Z", "+00:00")
+            end_str   = ev.end_datetime.replace("Z", "+00:00")
+            start_local = datetime.fromisoformat(start_str)
+            end_local   = datetime.fromisoformat(end_str)
         except ValueError:
             continue
 

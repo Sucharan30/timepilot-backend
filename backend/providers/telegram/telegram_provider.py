@@ -1148,11 +1148,32 @@ class TelegramProvider(TelegramProviderBase):
             return
 
         _pending[str(chat_id)] = {"type": "schedule", "data": parsed, "raw": text}
+        
+        # Format the datetime for display
+        from backend.database import SessionLocal
+        from backend.services.timezone_service import TimezoneService
+        from datetime import datetime
+        
+        db = SessionLocal()
+        display_time = parsed.get("start_datetime", "—")
+        try:
+            account, user = self._get_user_from_chat(db, chat_id)
+            user_tz = getattr(user, "timezone", "Asia/Kolkata") if user else "Asia/Kolkata"
+            if display_time != "—":
+                # Assuming parsed time is ISO format
+                parsed_dt = datetime.fromisoformat(display_time)
+                local_dt = TimezoneService.to_user_tz(parsed_dt, user_tz)
+                display_time = local_dt.strftime("%b %d, %I:%M %p")
+        except Exception:
+            pass
+        finally:
+            db.close()
+            
         self.send_message(
             chat_id,
             f"📅 <b>Confirm Event</b>\n\n"
             f"  Title:  {parsed.get('title', '—')}\n"
             f"  Type:   {parsed.get('event_type', '—')}\n"
-            f"  Start:  {parsed.get('start_datetime', '—')}\n\n"
+            f"  Start:  {display_time}\n\n"
             f"Reply <b>confirm</b> to save or <b>cancel</b> to discard."
         )
