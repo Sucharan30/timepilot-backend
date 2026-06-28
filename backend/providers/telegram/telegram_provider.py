@@ -1132,9 +1132,22 @@ class TelegramProvider(TelegramProviderBase):
     # ════════════════════════════════════════════════════════════════════════════
 
     def _handle_schedule_nlp(self, chat_id, text: str) -> None:
+        from backend.database import SessionLocal
+        from backend.services.timezone_service import TimezoneService
+        from datetime import datetime
+        
+        db = SessionLocal()
+        user_tz = "Asia/Kolkata"
+        try:
+            account, user = self._get_user_from_chat(db, chat_id)
+            if user:
+                user_tz = getattr(user, "timezone", "Asia/Kolkata")
+        finally:
+            db.close()
+            
         try:
             from backend.services.gemini_schedule_parser import gemini_parser
-            parsed = gemini_parser.parse(text)
+            parsed = gemini_parser.parse(text, user_tz)
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ I didn't understand that. Try 'help' for a list of commands.\n\nError: {exc}")
             return
@@ -1158,15 +1171,8 @@ class TelegramProvider(TelegramProviderBase):
         _pending[str(chat_id)] = {"type": "schedule", "data": parsed, "raw": text}
         
         # Format the datetime for display
-        from backend.database import SessionLocal
-        from backend.services.timezone_service import TimezoneService
-        from datetime import datetime
-        
-        db = SessionLocal()
         display_time = parsed.get("start_datetime", "—")
         try:
-            account, user = self._get_user_from_chat(db, chat_id)
-            user_tz = getattr(user, "timezone", "Asia/Kolkata") if user else "Asia/Kolkata"
             if display_time != "—":
                 # Assuming parsed time is ISO format
                 parsed_dt = datetime.fromisoformat(display_time)
@@ -1174,8 +1180,6 @@ class TelegramProvider(TelegramProviderBase):
                 display_time = local_dt.strftime("%b %d, %I:%M %p")
         except Exception:
             pass
-        finally:
-            db.close()
             
         self.send_message(
             chat_id,
