@@ -17,7 +17,7 @@ from backend.schemas.analytics import AnalyticsResponse
 
 
 # ── Category mapping from event_type → analytics bucket ──────────────────────
-_STUDY_TYPES    = {"class", "deadline", "task"}
+_STUDY_TYPES    = {"class", "deadline", "task", "study"}   # study type added
 _MEETING_TYPES  = {"meeting", "appointment"}
 _PERSONAL_TYPES = {"reminder"}
 

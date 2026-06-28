@@ -4,16 +4,18 @@ backend/api/events.py
 Event CRUD endpoints (all JWT-protected, user-scoped):
 
   POST   /events           — create a new event (auto-schedules notification)
-  GET    /events           — list all events for the current user
+  GET    /events           — list all events including recurring occurrences
   GET    /events/{id}      — get a single event
   PUT    /events/{id}      — update an event (partial update)
-  DELETE /events/{id}      — delete an event
+  DELETE /events/{id}      — delete an event (scope: this|future|all)
   GET    /events/stream    — SSE real-time stream (see sse.py)
 
 All datetime fields in responses are UTC ISO 8601.
 The frontend should convert to local time using the user's timezone from GET /auth/me.
 """
-from fastapi import APIRouter, Depends, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from backend.core.dependencies import get_db, get_current_user
@@ -52,9 +54,19 @@ def list_events(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Return all events belonging to the authenticated user."""
+    """
+    Return all events belonging to the authenticated user,
+    including dynamically generated occurrences of recurring events.
+    """
     events = EventService.list_events(user_id=current_user.id, db=db)
-    return ok([EventResponse.model_validate(e).model_dump() for e in events])
+    result = []
+    for e in events:
+        if isinstance(e, dict):
+            # Dynamic recurring occurrence — already a dict
+            result.append(e)
+        else:
+            result.append(EventResponse.model_validate(e).model_dump())
+    return ok(result)
 
 
 # ── GET /events/{event_id} ────────────────────────────────────────────────────
@@ -98,13 +110,16 @@ def update_event(
 @router.delete("/{event_id}", status_code=status.HTTP_200_OK)
 def delete_event(
     event_id: int,
+    scope: str = Query("all", description="Deletion scope: 'this' | 'future' | 'all'"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Delete an event permanently."""
+    """Delete an event permanently. For recurring events, use scope to control range."""
     EventService.delete_event(
         user_id=current_user.id,
         event_id=event_id,
         db=db,
+        scope=scope,
     )
     return ok({"message": f"Event {event_id} deleted successfully."})
+

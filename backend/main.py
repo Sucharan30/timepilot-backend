@@ -54,6 +54,9 @@ from backend.api.saving_goals import router as saving_goals_router
 from backend.api.streaks import router as streaks_router
 from backend.api.rewards import router as rewards_router
 from backend.api.sse import router as sse_router
+from backend.api.notifications import router as notifications_router
+from backend.api.study_planner import router as study_planner_router
+from backend.api.ai_schedule import router as ai_schedule_router
 
 # ── Lifespan (startup + shutdown) ────────────────────────────────────────────────────
 @asynccontextmanager
@@ -111,6 +114,59 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE otp_verifications ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;"))
             except Exception:
                 pass
+
+            # ── Recurring Event columns ──────────────────────────────────────
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN is_recurring BOOLEAN NOT NULL DEFAULT 0;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN recurrence_type VARCHAR(20) NULL DEFAULT 'none';"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN recurrence_interval INTEGER NULL DEFAULT 1;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN recurrence_end_date DATE NULL;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN parent_event_id INTEGER NULL;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE events ADD COLUMN exception_date VARCHAR(10) NULL;"))
+            except Exception:
+                pass
+
+            # ── Migrate event_type ENUM to include 'study' ───────────────────
+            try:
+                conn.execute(text(
+                    "ALTER TABLE events MODIFY COLUMN event_type ENUM('meeting','appointment','class','task','reminder','deadline','study') NOT NULL DEFAULT 'meeting';"
+                ))
+            except Exception:
+                pass
+
+            # ── Notification enhancements (title, body, type, is_read) ───────
+            try:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN title VARCHAR(255) NULL;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN body TEXT NULL;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN notification_type VARCHAR(50) NULL DEFAULT 'event_reminder';"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE notifications ADD COLUMN is_read BOOLEAN NOT NULL DEFAULT 0;"))
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Migration error: {e}")
 
@@ -155,6 +211,9 @@ app.include_router(saving_goals_router)
 app.include_router(streaks_router)
 app.include_router(rewards_router)
 app.include_router(sse_router)
+app.include_router(notifications_router)
+app.include_router(study_planner_router)
+app.include_router(ai_schedule_router)
 
 
 # =============================================================================

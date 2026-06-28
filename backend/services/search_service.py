@@ -58,19 +58,26 @@ class SearchService:
                 .limit(limit)
                 .all()
             )
-            results["events"] = [
-                {
+            
+            results["events"] = []
+            results["tasks"] = []
+            
+            for e in events:
+                event_type_val = e.event_type.value if hasattr(e.event_type, "value") else str(e.event_type)
+                item = {
                     "id": e.id,
                     "title": e.title,
                     "description": e.description,
-                    "event_type": e.event_type.value if hasattr(e.event_type, "value") else str(e.event_type),
+                    "event_type": event_type_val,
                     "status": e.status.value if hasattr(e.status, "value") else str(e.status),
                     "start_datetime": TimezoneService.format_for_display(e.start_datetime, user_timezone),
                     "end_datetime": TimezoneService.format_for_display(e.end_datetime, user_timezone),
                     "entity_type": "event",
                 }
-                for e in events
-            ]
+                if event_type_val == "task":
+                    results["tasks"].append(item)
+                else:
+                    results["events"].append(item)
 
         if category in ("all", "expenses"):
             expenses = (

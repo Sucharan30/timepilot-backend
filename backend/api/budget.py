@@ -5,6 +5,7 @@ Budget management endpoints (JWT-protected):
 
   POST   /budget            — create a budget for a category
   GET    /budget            — list all budgets
+  GET    /budget/summary    — list all budgets with spent/remaining/percentage
   PUT    /budget/{id}       — update a budget
   DELETE /budget/{id}       — delete a budget
   GET    /budget/alerts     — get categories at 80%+ usage
@@ -33,6 +34,21 @@ def budget_alerts(
     """
     alerts = BudgetService.get_alerts(user_id=current_user.id, db=db)
     return ok([a.model_dump() for a in alerts])
+
+
+# ── GET /budget/summary ───────────────────────────────────────────────────────
+
+@router.get("/summary")
+def budget_summary(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Returns all budget categories with allocated, spent, remaining, and percentage.
+    Used by dashboard and budget page for progress bars.
+    """
+    summary = BudgetService.get_summary(user_id=current_user.id, db=db)
+    return ok(summary)
 
 
 # ── POST /budget ──────────────────────────────────────────────────────────────
@@ -87,3 +103,4 @@ def delete_budget(
     """Delete a budget permanently."""
     BudgetService.delete_budget(user_id=current_user.id, budget_id=budget_id, db=db)
     return ok({"message": f"Budget {budget_id} deleted."})
+

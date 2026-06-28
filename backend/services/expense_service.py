@@ -123,3 +123,37 @@ class BudgetService:
                 ))
 
         return alerts
+
+    @staticmethod
+    def get_summary(user_id: int, db: Session) -> List[dict]:
+        """
+        Return per-category summary: allocated, spent, remaining, percentage.
+        Used by budget page and dashboard for progress bars.
+        """
+        now = datetime.now(timezone.utc)
+        budgets = BudgetRepository.get_all_for_user(db, user_id)
+        monthly_spending = ExpenseRepository.get_monthly_total_by_category(db, user_id, now.year, now.month)
+
+        result = []
+        for b in budgets:
+            spent = float(monthly_spending.get(b.category, 0))
+            limit = float(b.monthly_limit)
+            remaining = max(0, limit - spent)
+            pct = round(spent / limit * 100, 1) if limit > 0 else 0.0
+            alert_status = "normal"
+            if pct >= 100:
+                alert_status = "exceeded"
+            elif pct >= 80:
+                alert_status = "warning"
+
+            result.append({
+                "id": b.id,
+                "category": b.category,
+                "monthly_limit": limit,
+                "spent": spent,
+                "remaining": remaining,
+                "percentage": pct,
+                "status": alert_status,
+            })
+
+        return result

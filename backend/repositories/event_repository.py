@@ -26,8 +26,15 @@ class EventRepository:
         start_datetime: datetime,
         description: Optional[str] = None,
         end_datetime: Optional[datetime] = None,
+        is_recurring: bool = False,
+        recurrence_type=None,
+        recurrence_interval: int = 1,
+        recurrence_end_date=None,
+        parent_event_id: Optional[int] = None,
+        exception_date: Optional[str] = None,
     ) -> Event:
         """Persist a new event and return it."""
+        from backend.models.event import RecurrenceType
         event = Event(
             user_id=user_id,
             title=title,
@@ -36,6 +43,12 @@ class EventRepository:
             start_datetime=start_datetime,
             end_datetime=end_datetime,
             status=EventStatus.scheduled,
+            is_recurring=is_recurring,
+            recurrence_type=recurrence_type or RecurrenceType.none,
+            recurrence_interval=recurrence_interval,
+            recurrence_end_date=recurrence_end_date,
+            parent_event_id=parent_event_id,
+            exception_date=exception_date,
         )
         db.add(event)
         db.commit()
