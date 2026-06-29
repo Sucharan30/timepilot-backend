@@ -63,8 +63,9 @@ def generate_study_plan(
 
     try:
         from backend.models.event import Event, EventStatus
-        from dateutil.parser import parse as parse_date
         from datetime import timezone
+        def parse_date(d: str) -> datetime:
+            return datetime.fromisoformat(d.replace("Z", "+00:00"))
         
         now = datetime.now()
         exam_dt = parse_date(body.exam_date)
@@ -149,7 +150,9 @@ def confirm_study_plan(
     parse_errors = []
     for session in body.sessions:
         try:
-            from dateutil.parser import parse as parse_date
+            from datetime import datetime
+            def parse_date(d: str) -> datetime:
+                return datetime.fromisoformat(d.replace("Z", "+00:00"))
             start_local = parse_date(session.start_datetime)
             end_local   = parse_date(session.end_datetime) if session.end_datetime else start_local
         except Exception as e:

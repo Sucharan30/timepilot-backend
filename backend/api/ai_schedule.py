@@ -67,7 +67,9 @@ def negotiate_schedule(
 
     try:
         from backend.models.event import Event, EventStatus
-        from dateutil.parser import parse as parse_date
+        from datetime import datetime
+        def parse_date(d: str) -> datetime:
+            return datetime.fromisoformat(d.replace("Z", "+00:00"))
         start_dt = parse_date(body.free_start)
         end_dt = parse_date(body.free_end)
 
@@ -153,7 +155,9 @@ def confirm_schedule(
     parse_errors = []
     for ev in body.events:
         try:
-            from dateutil.parser import parse as parse_date
+            from datetime import datetime
+            def parse_date(d: str) -> datetime:
+                return datetime.fromisoformat(d.replace("Z", "+00:00"))
             start_local = parse_date(ev.start_datetime)
             end_local   = parse_date(ev.end_datetime) if ev.end_datetime else start_local
         except Exception as e:
