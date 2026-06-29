@@ -57,6 +57,7 @@ from backend.api.sse import router as sse_router
 from backend.api.notifications import router as notifications_router
 from backend.api.study_planner import router as study_planner_router
 from backend.api.ai_schedule import router as ai_schedule_router
+from backend.api.whiteboard import router as whiteboard_router
 
 # ── Lifespan (startup + shutdown) ────────────────────────────────────────────────────
 @asynccontextmanager
@@ -214,6 +215,7 @@ app.include_router(sse_router)
 app.include_router(notifications_router)
 app.include_router(study_planner_router)
 app.include_router(ai_schedule_router)
+app.include_router(whiteboard_router)
 
 
 # =============================================================================

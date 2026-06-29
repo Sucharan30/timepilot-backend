@@ -55,6 +55,7 @@ class ConfirmScheduleRequest(BaseModel):
 @router.post("/negotiate")
 def negotiate_schedule(
     body: NegotiateRequest,
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
@@ -65,6 +66,24 @@ def negotiate_schedule(
         raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured.")
 
     try:
+        from backend.models.event import Event, EventStatus
+        from dateutil.parser import parse as parse_date
+        start_dt = parse_date(body.free_start)
+        end_dt = parse_date(body.free_end)
+
+        # Fetch existing events in this window to avoid conflicts
+        existing_events = db.query(Event).filter(
+            Event.user_id == current_user.id,
+            Event.status != EventStatus.cancelled,
+            Event.end_datetime > start_dt,
+            Event.start_datetime < end_dt
+        ).all()
+
+        context_str = ""
+        if existing_events:
+            context_str = "\n".join([f"- {e.title} ({e.start_datetime.strftime('%H:%M')} to {e.end_datetime.strftime('%H:%M')})" for e in existing_events if e.end_datetime])
+            context_str = f"\nCRITICAL: The user already has the following events scheduled during this window:\n{context_str}\nDO NOT schedule new tasks overlapping with these existing events!"
+
         import google.generativeai as genai
         genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel(
@@ -82,12 +101,13 @@ def negotiate_schedule(
         tasks_str = "\n".join([f"- {t.name} ({t.duration_minutes} min)" for t in body.tasks])
         prompt = f"""
 Free time window: {body.free_start} to {body.free_end}
+{context_str}
 
 Tasks to schedule:
 {tasks_str}
 
 Create an optimal schedule:
-- Fit all tasks within the free window.
+- Fit all tasks within the free window without overlapping existing events.
 - Add 5-10 minute breaks between tasks.
 - Order by priority if possible.
 - Use realistic event_type values: meeting, task, study, reminder.
@@ -130,12 +150,14 @@ def confirm_schedule(
     user_tz = getattr(current_user, "timezone", "Asia/Kolkata")
     created_ids = []
 
+    parse_errors = []
     for ev in body.events:
         try:
             from dateutil.parser import parse as parse_date
             start_local = parse_date(ev.start_datetime)
-            end_local   = parse_date(ev.end_datetime)
+            end_local   = parse_date(ev.end_datetime) if ev.end_datetime else start_local
         except Exception as e:
+            parse_errors.append(str(e))
             continue
 
         start_utc = TimezoneService.to_utc(start_local, user_tz)
@@ -167,7 +189,7 @@ def confirm_schedule(
             raise HTTPException(status_code=500, detail=f"Database error saving event: {str(e)}")
 
     if not created_ids and body.events:
-        raise HTTPException(status_code=400, detail="Failed to parse and save any events. The AI may have generated invalid dates.")
+        raise HTTPException(status_code=400, detail=f"Failed to parse and save any events. Errors: {parse_errors}")
 
     # Broadcast SSE
     try:

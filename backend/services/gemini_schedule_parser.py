@@ -28,11 +28,13 @@ settings = get_settings()
 
 # ── Prompt template ───────────────────────────────────────────────────────────
 
-def get_system_prompt(user_tz: str = "UTC") -> str:
+def get_system_prompt(user_tz: str = "UTC", context: str = "") -> str:
     from backend.services.timezone_service import TimezoneService
     now_iso = TimezoneService.now_in_tz(user_tz).isoformat()
     return f"""You are TimePilot AI, a productivity assistant.
 Today's current date and time is: {now_iso}
+
+{context}
 
 Given a message, determine if it is a scheduling request or a general conversation.
 Return ONLY valid JSON (no markdown, no explanation).
@@ -90,7 +92,7 @@ class GeminiScheduleParser:
 
         return self._client
 
-    def parse(self, message: str, user_tz: str = "UTC") -> Dict[str, Any]:
+    def parse(self, message: str, user_tz: str = "UTC", context: str = "") -> Dict[str, Any]:
         """
         Send the user's message to Gemini and return the parsed JSON dict.
         Raises HTTPException on Gemini error or invalid JSON.
@@ -102,7 +104,7 @@ class GeminiScheduleParser:
             import google.generativeai as genai
             model = genai.GenerativeModel(
                 model_name="gemini-2.5-flash",
-                system_instruction=get_system_prompt(user_tz),
+                system_instruction=get_system_prompt(user_tz, context),
             )
             response = model.generate_content(message)
             raw_text = response.text.strip()

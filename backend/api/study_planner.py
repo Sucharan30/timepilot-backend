@@ -51,6 +51,7 @@ class StudyConfirmRequest(BaseModel):
 @router.post("/generate")
 def generate_study_plan(
     body: StudyPlanRequest,
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
@@ -61,6 +62,26 @@ def generate_study_plan(
         raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured.")
 
     try:
+        from backend.models.event import Event, EventStatus
+        from dateutil.parser import parse as parse_date
+        from datetime import timezone
+        
+        now = datetime.now()
+        exam_dt = parse_date(body.exam_date)
+        
+        # Fetch existing events up to exam date to avoid conflicts
+        existing_events = db.query(Event).filter(
+            Event.user_id == current_user.id,
+            Event.status != EventStatus.cancelled,
+            Event.end_datetime > now.replace(tzinfo=timezone.utc),
+            Event.start_datetime < exam_dt.replace(tzinfo=timezone.utc)
+        ).all()
+        
+        context_str = ""
+        if existing_events:
+            context_str = "\n".join([f"- {e.title} ({e.start_datetime.strftime('%Y-%m-%d %H:%M')} to {e.end_datetime.strftime('%H:%M')})" for e in existing_events if e.end_datetime])
+            context_str = f"\nCRITICAL: The user has these events scheduled:\n{context_str}\nDO NOT schedule study sessions that overlap with these times!"
+
         import google.generativeai as genai
         genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel(
@@ -73,18 +94,18 @@ def generate_study_plan(
             )
         )
 
-        now = datetime.now()
         prompt = f"""
 Subject: {body.subject}
 Total chapters: {body.chapters}
 Exam date: {body.exam_date}
 Daily study hours: {body.daily_hours}
 Today's date: {now.strftime('%Y-%m-%d')}
+{context_str}
 
 Generate a day-by-day study plan from today until one day before the exam.
 Distribute chapters evenly across the days.
 Include revision sessions and a mock test on the last day.
-Each session should be {body.daily_hours} hours long, starting at 08:00 AM.
+Find an available {body.daily_hours}-hour slot each day. If 08:00 AM is free, use that. Otherwise, pick an open time.
 
 Return ONLY a JSON array like:
 [
@@ -125,12 +146,14 @@ def confirm_study_plan(
     user_tz = getattr(current_user, "timezone", "Asia/Kolkata")
     created_events = []
 
+    parse_errors = []
     for session in body.sessions:
         try:
             from dateutil.parser import parse as parse_date
             start_local = parse_date(session.start_datetime)
-            end_local   = parse_date(session.end_datetime)
+            end_local   = parse_date(session.end_datetime) if session.end_datetime else start_local
         except Exception as e:
+            parse_errors.append(str(e))
             continue
 
         start_utc = TimezoneService.to_utc(start_local, user_tz)
@@ -157,7 +180,7 @@ def confirm_study_plan(
             raise HTTPException(status_code=500, detail=f"Database error saving session: {str(e)}")
 
     if not created_events and body.sessions:
-        raise HTTPException(status_code=400, detail="Failed to parse and save any sessions. The AI may have generated invalid dates.")
+        raise HTTPException(status_code=400, detail=f"Failed to parse and save any sessions. Errors: {parse_errors}")
 
     # Broadcast SSE update
     try:

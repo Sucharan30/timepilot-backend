@@ -164,6 +164,11 @@ class TelegramProvider(TelegramProviderBase):
             return False
 
     def handle_update(self, update: dict[str, Any]) -> None:
+        # Handle Callback Queries first
+        if "callback_query" in update:
+            self._handle_callback_query(update["callback_query"])
+            return
+
         message = update.get("message", {})
         if not message:
             return
@@ -242,7 +247,7 @@ class TelegramProvider(TelegramProviderBase):
 
         # ── Study ─────────────────────────────────────────────────────────────
         elif intent == "study":
-            self._handle_study_info(chat_id)
+            self._handle_study_nlp(chat_id, text, user_obj)
 
         # ── Analytics ────────────────────────────────────────────────────────
         elif intent == "analytics":
@@ -960,6 +965,8 @@ class TelegramProvider(TelegramProviderBase):
             self._do_delete_expense(chat_id, data["expense_id"], data["category"])
         elif ptype == "delete_budget":
             self._do_delete_budget(chat_id, data["budget_id"], data["category"])
+        elif ptype == "study_plan":
+            self._save_study_plan(chat_id, data)
         else:
             self.send_message(chat_id, "⚠️ Unknown pending action.")
 
@@ -1073,6 +1080,66 @@ class TelegramProvider(TelegramProviderBase):
         finally:
             db.close()
 
+    def _save_study_plan(self, chat_id, data: list) -> None:
+        from datetime import datetime
+        from backend.database import SessionLocal
+        from backend.repositories.event_repository import EventRepository
+        from backend.models.event import EventType
+        from backend.services.timezone_service import TimezoneService
+        from backend.services.notification_service import NotificationService
+
+        db = SessionLocal()
+        try:
+            account, user = self._get_user_from_chat(db, chat_id)
+            if not account:
+                self.send_message(chat_id, "⚠️ Account not linked.")
+                return
+
+            user_tz = getattr(user, "timezone", "Asia/Kolkata") if user else "Asia/Kolkata"
+            events_created = 0
+
+            for session in data:
+                try:
+                    start_local = datetime.fromisoformat(session["start_datetime"])
+                    end_local   = datetime.fromisoformat(session["end_datetime"]) if session.get("end_datetime") else None
+                except (ValueError, KeyError, TypeError):
+                    continue
+
+                start_utc = TimezoneService.to_utc(start_local, user_tz)
+                end_utc   = TimezoneService.to_utc(end_local, user_tz) if end_local else None
+
+                event = EventRepository.create(
+                    db=db,
+                    user_id=account.user_id,
+                    title=session.get("title", "Study Session"),
+                    description=session.get("description"),
+                    event_type=EventType.study,
+                    start_datetime=start_utc,
+                    end_datetime=end_utc,
+                )
+                events_created += 1
+
+                if user:
+                    try:
+                        NotificationService.schedule_event_notification(db, event, user)
+                    except Exception:
+                        pass
+
+            self.send_message(
+                chat_id,
+                f"✅ <b>Study Plan Saved!</b>\n{events_created} sessions added to your calendar."
+            )
+
+            try:
+                from backend.api.sse import broadcast_event
+                broadcast_event(account.user_id, "event_created", {"source": "telegram_study"})
+            except Exception:
+                pass
+        except Exception as exc:
+            self.send_message(chat_id, f"⚠️ Failed to save study plan: {exc}")
+        finally:
+            db.close()
+
     def _do_delete_event(self, chat_id, event_id: int, title: str) -> None:
         from backend.database import SessionLocal
         from backend.repositories.event_repository import EventRepository
@@ -1138,16 +1205,30 @@ class TelegramProvider(TelegramProviderBase):
         
         db = SessionLocal()
         user_tz = "Asia/Kolkata"
+        context_str = ""
         try:
             account, user = self._get_user_from_chat(db, chat_id)
             if user:
                 user_tz = getattr(user, "timezone", "Asia/Kolkata")
+                from backend.models.event import Event, EventStatus
+                from datetime import timedelta, timezone
+                now_utc = datetime.now(timezone.utc)
+                next_week_utc = now_utc + timedelta(days=7)
+                existing_events = db.query(Event).filter(
+                    Event.user_id == user.id,
+                    Event.status != EventStatus.cancelled,
+                    Event.end_datetime > now_utc,
+                    Event.start_datetime < next_week_utc
+                ).all()
+                if existing_events:
+                    context_str = "\n".join([f"- {e.title} ({e.start_datetime.strftime('%Y-%m-%d %H:%M')} to {e.end_datetime.strftime('%H:%M')})" for e in existing_events if e.end_datetime])
+                    context_str = f"\nCRITICAL: The user has these events scheduled over the next 7 days:\n{context_str}\nDO NOT schedule new tasks overlapping with these existing events!"
         finally:
             db.close()
             
         try:
             from backend.services.gemini_schedule_parser import gemini_parser
-            parsed = gemini_parser.parse(text, user_tz)
+            parsed = gemini_parser.parse(text, user_tz, context_str)
         except Exception as exc:
             self.send_message(chat_id, f"⚠️ I didn't understand that. Try 'help' for a list of commands.\n\nError: {exc}")
             return

@@ -123,3 +123,31 @@ def delete_event(
     )
     return ok({"message": f"Event {event_id} deleted successfully."})
 
+
+# ── POST /events/{id}/snooze ──────────────────────────────────────────────────
+
+@router.post("/{event_id}/snooze")
+def snooze_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Snooze an event by 10 minutes.
+    """
+    from datetime import timedelta
+    from backend.services.notification_service import NotificationService
+    
+    event = EventService.get_event(user_id=current_user.id, event_id=event_id, db=db)
+    
+    new_start = event.start_datetime + timedelta(minutes=10)
+    new_end = event.end_datetime + timedelta(minutes=10) if event.end_datetime else None
+    
+    # We update manually to bypass full validation payload for a quick action
+    event.start_datetime = new_start
+    event.end_datetime = new_end
+    db.commit()
+    db.refresh(event)
+    
+    NotificationService.schedule_event_notification(db, event, current_user)
+    return ok(EventResponse.model_validate(event).model_dump())

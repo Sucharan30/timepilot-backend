@@ -93,14 +93,30 @@ def check_notifications():
             user_tz = getattr(user, "timezone", "Asia/Kolkata")
             local_start = TimezoneService.to_user_tz(event.start_datetime, user_tz)
             time_str = local_start.strftime("%I:%M %p") if local_start else "soon"
-            reminder_minutes = getattr(user, "reminder_minutes", 15)
+            
+            # Calculate actual minutes from notification_time to event.start_datetime
+            delta = event.start_datetime - notif.notification_time
+            actual_minutes = int(delta.total_seconds() / 60)
+            
+            if actual_minutes > 0:
+                time_text = f"in {actual_minutes} minute(s)"
+            else:
+                time_text = "now"
 
             message = (
                 f"⏰ <b>Reminder</b>\n\n"
-                f"<b>{event.title}</b> starts in {reminder_minutes} minute(s) at {time_str}.\n\n"
+                f"<b>{event.title}</b> starts {time_text} at {time_str}.\n\n"
                 f"Stay on schedule! 🚀"
             )
-            sent = telegram.send_message(tg.telegram_chat_id, message)
+            
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "✅ Completed", "callback_data": f"complete_{event.id}"}],
+                    [{"text": "⏰ Snooze 10m", "callback_data": f"snooze_{event.id}"}, {"text": "❌ Cancel", "callback_data": f"cancel_{event.id}"}]
+                ]
+            }
+            
+            sent = telegram.send_message(tg.telegram_chat_id, message, reply_markup=reply_markup)
 
             if sent:
                 notif.sent = True

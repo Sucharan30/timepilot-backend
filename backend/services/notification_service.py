@@ -22,47 +22,51 @@ from backend.services.timezone_service import TimezoneService
 class NotificationService:
 
     @staticmethod
-    def schedule_event_notification(db: Session, event: Event, user: User) -> Optional[Notification]:
+    def schedule_event_notification(db: Session, event: Event, user: User) -> list:
         """
-        Create a Notification row for an event.
-
-        The notification fires `user.reminder_minutes` before the event starts.
-        If the event is in the past (or notification would be in the past), skip.
-
-        Returns the created Notification or None if skipped.
+        Create Notification rows for an event.
+        Schedules at 15m before, 5m before, and exactly at start time (0m).
+        Returns a list of created Notifications.
         """
         if not user.notification_enabled:
-            return None
+            return []
 
         # Check event type is in user's enabled categories
         enabled_categories = (user.notification_categories or "").split(",")
         event_type_str = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
         if enabled_categories and event_type_str not in enabled_categories:
-            return None
+            return []
 
-        reminder_minutes = user.reminder_minutes or 15
-        notification_time = event.start_datetime - timedelta(minutes=reminder_minutes)
-
-        # Don't schedule if notification time is already in the past
         now_utc = TimezoneService.now_utc()
-        if notification_time.tzinfo is None:
-            import pytz
-            notification_time = pytz.utc.localize(notification_time)
+        import pytz
+        created = []
+        
+        # Schedule for 15, 5, and 0 minutes
+        for mins in [15, 5, 0]:
+            notification_time = event.start_datetime - timedelta(minutes=mins)
+            
+            if notification_time.tzinfo is None:
+                notification_time = pytz.utc.localize(notification_time)
 
-        if notification_time <= now_utc:
-            return None
+            if notification_time <= now_utc:
+                continue
 
-        notification = Notification(
-            user_id=event.user_id,
-            event_id=event.id,
-            notification_time=notification_time,
-            sent=False,
-        )
-        db.add(notification)
-        db.commit()
-        db.refresh(notification)
-        print(f"[NotificationService] Scheduled reminder for event_id={event.id} at {notification_time}")
-        return notification
+            notification = Notification(
+                user_id=event.user_id,
+                event_id=event.id,
+                notification_time=notification_time,
+                sent=False,
+            )
+            db.add(notification)
+            created.append(notification)
+            
+        if created:
+            db.commit()
+            for n in created:
+                db.refresh(n)
+                print(f"[NotificationService] Scheduled reminder for event_id={event.id} at {n.notification_time}")
+                
+        return created
 
     @staticmethod
     def get_settings(user: User) -> dict:
